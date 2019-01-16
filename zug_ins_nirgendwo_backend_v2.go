@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
+	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/playlist"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/sse"
 	"github.com/gorilla/mux"
 )
@@ -23,9 +24,6 @@ var playerAddress = "127.0.0.1:33333"
 // static serve directory
 var serveFilesPath = "./public"
 
-// IO channels
-var serialInput, serialOutput chan []byte
-
 // handle for SSE-Server
 var sseServer *sse.Server
 
@@ -35,12 +33,25 @@ var nextCommandID int32 = 1
 // holds a command queue and does the processing
 var queueWorker *command.QueueWorker
 
+func handleMovies(w http.ResponseWriter, r *http.Request) {
+
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	// create movielist
+	movieList := playlist.CreateMovieList("/home/crocdialer/Movies")
+
+	for _, mov := range movieList {
+		log.Println(mov)
+	}
+
+	enc := json.NewEncoder(w)
+	enc.Encode(movieList)
+}
+
 // POST
 func handleCommand(w http.ResponseWriter, r *http.Request) {
-
-	// configure proper CORS
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// set content type
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	// decode json-request
@@ -61,10 +72,12 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 // preflight OPTIONS
 func corsHandler(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "OPTIONS" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		} else {
+
+		// configure proper CORS
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method != "OPTIONS" {
 			handler(w, r)
 		}
 	}
@@ -108,6 +121,7 @@ func main() {
 
 	// http services
 	muxRouter.Handle("/events", sseServer)
+	muxRouter.HandleFunc("/movies", corsHandler(handleMovies)).Methods("GET", "OPTIONS")
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
 	http.Handle("/", muxRouter)
