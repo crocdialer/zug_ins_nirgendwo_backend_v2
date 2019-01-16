@@ -1,16 +1,21 @@
 package sse
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+
+	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 )
 
 // A Server holds open client connections,
 // listens for incoming events on its NodeEvent and CommandEvent channels
 // and broadcasts event data to all registered connections
 type Server struct {
+	ACKQueue chan *command.ACK
 
 	// Events are pushed to this channel by the main events-gathering routine
-	Notifier chan []byte
+	notifier chan []byte
 
 	// New client connections
 	newClients chan chan []byte
@@ -26,7 +31,8 @@ type Server struct {
 func NewServer() (server *Server) {
 	// Instantiate a server
 	server = &Server{
-		Notifier:       make(chan []byte, 100),
+		ACKQueue:       make(chan *command.ACK, 100),
+		notifier:       make(chan []byte, 100),
 		newClients:     make(chan chan []byte),
 		closingClients: make(chan chan []byte),
 		clients:        make(map[chan []byte]bool),
@@ -58,7 +64,15 @@ func (server *Server) listen() {
 			delete(server.clients, s)
 			// log.Printf("Removed client. %d registered clients", len(server.clients))
 
-		case event := <-server.Notifier:
+		case ack := <-server.ACKQueue:
+			if jsonACK, err := json.Marshal(ack); err == nil {
+				sseBLob := fmt.Sprintf("event: commandACK\ndata: %s\n\n", jsonACK)
+
+				// send out CommandEvent
+				server.notifier <- []byte(sseBLob)
+			}
+		case event := <-server.notifier:
+
 			// Send event to all connected clients
 			for clientMessageChan := range server.clients {
 				clientMessageChan <- event
