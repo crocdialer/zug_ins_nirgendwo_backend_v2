@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/sse"
@@ -34,11 +32,8 @@ var sseServer *sse.Server
 // next command id
 var nextCommandID int32 = 1
 
-// command queue
-var commandQueue chan *command.Command
-
-// commands done
-var commandsDone chan *command.ACK
+// holds a command queue and does the processing
+var queueWorker *command.QueueWorker
 
 // POST
 func handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -56,9 +51,7 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 	// insert struct-type and CommandID
 	command.CommandID = int(atomic.AddInt32(&nextCommandID, 1))
 	log.Println("command:", command)
-	commandQueue <- command
-
-	// ack := CommandACK{CommandID: command.CommandID}
+	queueWorker.Commands <- command
 
 	// encode json ACK and send as response
 	enc := json.NewEncoder(w)
@@ -77,56 +70,10 @@ func corsHandler(handler http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func commandQueueWorker(commands <-chan *command.Command, results chan<- *command.ACK) {
-
-	responseBuffer := make([]byte, 1<<12)
-
-	for cmd := range commands {
-
-		// tcp communication with kinskiPlayer here
-		con, err := net.Dial("tcp", playerAddress)
-		defer con.Close()
-
-		if err == nil {
-			str := cmd.String() + "\n"
-			ack := &command.ACK{Command: cmd}
-
-			// send to player
-			if _, writeError := con.Write([]byte(str)); writeError == nil {
-
-				// command could be transferred
-				ack.Success = true
-
-				// timeout 50ms
-				timeOut := time.Now().Add(time.Millisecond * 50)
-
-				if deadLineErr := con.SetReadDeadline(timeOut); deadLineErr != nil {
-					log.Fatal(deadLineErr)
-				} else {
-
-					if bytesRead, readError := con.Read(responseBuffer); readError != nil {
-						// log.Println(readError)
-						log.Println(cmd)
-					} else {
-						// we got a response here
-						response := string(responseBuffer[:bytesRead])
-						log.Println(cmd, "->", response)
-						ack.Value = response
-					}
-				}
-
-				// push ACK to result channel
-				results <- ack
-			}
-		}
-	}
-}
-
 func commandQueueCollector(results <-chan *command.ACK) {
 	for ack := range results {
-		// log.Println("sse:", cmd)
 
-		// emit SSE update
+		// send ack via SSE
 		sseServer.ACKQueue <- ack
 	}
 }
@@ -146,12 +93,9 @@ func main() {
 		}
 	}
 
-	commandQueue = make(chan *command.Command, 100)
-	commandsDone = make(chan *command.ACK, 100)
-
 	// start command processing
-	go commandQueueWorker(commandQueue, commandsDone)
-	go commandQueueCollector(commandsDone)
+	queueWorker = command.NewQueueWorker(playerAddress)
+	go commandQueueCollector(queueWorker.Results)
 
 	// serve static files
 	fs := http.FileServer(http.Dir(serveFilesPath))
