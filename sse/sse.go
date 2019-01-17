@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
+	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/playlist"
 )
 
 // A Server holds open client connections,
@@ -13,6 +14,8 @@ import (
 // and broadcasts event data to all registered connections
 type Server struct {
 	ACKQueue chan *command.ACK
+
+	PlaybackQueue chan *playlist.PlaybackState
 
 	// Events are pushed to this channel by the main events-gathering routine
 	notifier chan []byte
@@ -32,6 +35,7 @@ func NewServer() (server *Server) {
 	// Instantiate a server
 	server = &Server{
 		ACKQueue:       make(chan *command.ACK, 100),
+		PlaybackQueue:  make(chan *playlist.PlaybackState, 100),
 		notifier:       make(chan []byte, 100),
 		newClients:     make(chan chan []byte),
 		closingClients: make(chan chan []byte),
@@ -71,6 +75,15 @@ func (server *Server) listen() {
 				// send out CommandEvent
 				server.notifier <- []byte(sseBLob)
 			}
+
+		case playState := <-server.PlaybackQueue:
+			if jsonBlob, err := json.Marshal(playState); err == nil {
+				sseBLob := fmt.Sprintf("event: playstate\ndata: %s\n\n", jsonBlob)
+
+				// send out PlaybackState
+				server.notifier <- []byte(sseBLob)
+			}
+
 		case event := <-server.notifier:
 
 			// Send event to all connected clients

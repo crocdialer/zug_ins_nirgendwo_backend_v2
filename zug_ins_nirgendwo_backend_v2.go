@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/playlist"
@@ -33,6 +34,9 @@ var nextCommandID int32 = 1
 // holds a command queue and does the processing
 var queueWorker *command.QueueWorker
 
+// playback info and updater
+var playStateUpdater *playlist.PlaybackStateUpdater
+
 func handleMovies(w http.ResponseWriter, r *http.Request) {
 
 	// set content type
@@ -47,6 +51,32 @@ func handleMovies(w http.ResponseWriter, r *http.Request) {
 
 	enc := json.NewEncoder(w)
 	enc.Encode(movieList)
+}
+
+// GET
+func handlePlayStateGET(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.Encode(playStateUpdater.GetState())
+}
+
+// POST
+func handlePlayStatePOST(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	state := playStateUpdater.GetState()
+
+	// decode json-request
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(&state)
+
+	// set new state
+	playStateUpdater.SetState(state)
+
+	enc := json.NewEncoder(w)
+	enc.Encode(state)
 }
 
 // POST
@@ -122,9 +152,14 @@ func main() {
 	// http services
 	muxRouter.Handle("/events", sseServer)
 	muxRouter.HandleFunc("/movies", corsHandler(handleMovies)).Methods("GET", "OPTIONS")
+	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
+	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStatePOST)).Methods("POST", "OPTIONS")
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
 	http.Handle("/", muxRouter)
+
+	// kick off periodic playbackstate updates
+	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
 
 	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))

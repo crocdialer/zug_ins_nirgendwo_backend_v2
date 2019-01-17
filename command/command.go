@@ -25,9 +25,9 @@ func (cmd *Command) String() string {
 
 // ACK is used as simple ACK for received commands
 type ACK struct {
-	Command *Command    `json:"command"`
-	Success bool        `json:"success"`
-	Value   interface{} `json:"value"`
+	Command *Command `json:"command"`
+	Success bool     `json:"success"`
+	Value   string   `json:"value"`
 }
 
 // QueueWorker pulls commands from a channel, sends them via tcp
@@ -51,45 +51,57 @@ func NewQueueWorker(tcpAddress string) *QueueWorker {
 
 func (worker *QueueWorker) run() {
 
-	responseBuffer := make([]byte, 1<<12)
+	responseBuffer := make([]byte, 1<<11)
 
 	for cmd := range worker.Commands {
+		// send the command
+		ack := Send(cmd, worker.TCPAddress, responseBuffer)
 
-		ack := &ACK{Command: cmd}
-
-		// tcp communication with kinskiPlayer here
-		con, err := net.Dial("tcp", worker.TCPAddress)
-
-		if err == nil {
-			defer con.Close()
-			str := cmd.String() + "\n"
-
-			// send to player
-			if _, writeError := con.Write([]byte(str)); writeError == nil {
-
-				// command could be transferred
-				ack.Success = true
-
-				// timeout 50ms
-				timeOut := time.Now().Add(time.Millisecond * 50)
-
-				if deadLineErr := con.SetReadDeadline(timeOut); deadLineErr != nil {
-					log.Fatal(deadLineErr)
-				} else {
-
-					if bytesRead, readError := con.Read(responseBuffer); readError != nil {
-						// log.Println(readError)
-						log.Println(cmd)
-					} else {
-						// we got a response here
-						response := string(responseBuffer[:bytesRead])
-						log.Println(cmd, "->", response)
-						ack.Value = response
-					}
-				}
-			}
-		}
 		// push ACK to result channel
 		worker.Results <- ack
 	}
+}
+
+// Send will send the provided command via tcp to the provided ip-address.
+// return: an ACK for the Command
+func Send(cmd *Command, ip string, responseBuffer []byte) *ACK {
+
+	if responseBuffer == nil {
+		responseBuffer = make([]byte, 1<<11)
+	}
+	ack := &ACK{Command: cmd}
+
+	// tcp communication with kinskiPlayer here
+	con, err := net.Dial("tcp", ip)
+
+	if err == nil {
+		defer con.Close()
+		str := cmd.String() + "\n"
+
+		// send to player
+		if _, writeError := con.Write([]byte(str)); writeError == nil {
+
+			// command could be transferred
+			ack.Success = true
+
+			// timeout 50ms
+			timeOut := time.Now().Add(time.Millisecond * 50)
+
+			if deadLineErr := con.SetReadDeadline(timeOut); deadLineErr != nil {
+				log.Fatal(deadLineErr)
+			} else {
+
+				if bytesRead, readError := con.Read(responseBuffer); readError != nil {
+					// log.Println(readError)
+					// log.Println(cmd)
+				} else {
+					// we got a response here
+					response := string(responseBuffer[:bytesRead])
+					// log.Println(cmd, "->", response)
+					ack.Value = response
+				}
+			}
+		}
+	}
+	return ack
 }
