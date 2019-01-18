@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -104,4 +105,58 @@ func Send(cmd *Command, ip string, responseBuffer []byte) *ACK {
 		}
 	}
 	return ack
+}
+
+// Playback sends the provided index and playlist to an attached media_player
+func Playback(ip string, index int, playlist []string) {
+
+	type Property struct {
+		Name  string      `json:"name"`
+		Type  string      `json:"type"`
+		Value interface{} `json:"value"`
+	}
+
+	type ComponentStruct struct {
+		Name       string     `json:"name"`
+		Properties []Property `json:"properties"`
+	}
+
+	comp := ComponentStruct{Name: "media_player"}
+
+	if playlist != nil {
+		comp.Properties = append(comp.Properties, Property{
+			Name:  "playlist",
+			Type:  "string_array",
+			Value: playlist,
+		})
+	}
+
+	comp.Properties = append(comp.Properties, Property{
+		Name:  "playlist index",
+		Type:  "int",
+		Value: index,
+	})
+
+	compList := []ComponentStruct{comp}
+
+	// serialize to json
+	if jsonBytes, jsonErr := json.Marshal(compList); jsonErr == nil {
+
+		log.Println(string(jsonBytes))
+
+		// tcp communication with kinskiPlayer here
+		con, err := net.Dial("tcp", ip)
+
+		if err == nil {
+			defer con.Close()
+
+			// send to player
+			if _, writeError := con.Write(jsonBytes); writeError != nil {
+				log.Println("could not send json data (Playback)")
+			}
+		}
+	} else {
+		log.Println("could not marshal Playback struct to json")
+	}
+
 }

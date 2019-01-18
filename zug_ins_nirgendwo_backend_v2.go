@@ -37,6 +37,9 @@ var queueWorker *command.QueueWorker
 // playback info and updater
 var playStateUpdater *playlist.PlaybackStateUpdater
 
+// media base directory
+var mediaDir = "/media/astrobase/Movies"
+
 // GET
 func handlePlaylistsGET(w http.ResponseWriter, r *http.Request) {
 	// set content type
@@ -120,6 +123,44 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 	enc.Encode(true)
 }
 
+// POST
+func handlePlayback(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	// decode json-request
+	newState := &playlist.PlaybackState{}
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(newState)
+
+	// make it so!
+	go playStateUpdater.Playback(newState.MovieIndex, newState.PlaylistIndex)
+
+	// encode json ACK and send as response
+	enc := json.NewEncoder(w)
+	enc.Encode(true)
+}
+
+// GET
+func handleSave(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.Encode(true)
+
+	playlist.Save(mediaDir)
+}
+
+// GET
+func handleLoad(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.Encode(true)
+
+	playlist.Init(mediaDir)
+}
+
 // preflight OPTIONS
 func corsHandler(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +198,11 @@ func main() {
 		}
 	}
 
+	// get media directory
+	if len(os.Args) > 3 {
+		mediaDir = os.Args[3]
+	}
+
 	// start command processing
 	queueWorker = command.NewQueueWorker(playerAddress)
 	go commandQueueCollector(queueWorker.Results)
@@ -172,17 +218,24 @@ func main() {
 
 	// http services
 	muxRouter.Handle("/events", sseServer)
+
+	// get/set playlist information
 	muxRouter.HandleFunc("/playlists", corsHandler(handlePlaylistsGET)).Methods("GET", "OPTIONS")
 	muxRouter.HandleFunc("/playlists", corsHandler(handlePlaylistsPOST)).Methods("POST", "OPTIONS")
 
+	// set the current playback indices for movie/playlist
+	muxRouter.HandleFunc("/playback", corsHandler(handlePlayback)).Methods("POST", "OPTIONS")
+
 	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
-	// muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStatePOST)).Methods("POST", "OPTIONS")
+	muxRouter.HandleFunc("/save", corsHandler(handleSave)).Methods("GET", "OPTIONS")
+	muxRouter.HandleFunc("/load", corsHandler(handleLoad)).Methods("GET", "OPTIONS")
+
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
 	http.Handle("/", muxRouter)
 
 	// init playlist module
-	playlist.Init("/home/crocdialer/Movies")
+	playlist.Init(mediaDir)
 
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)

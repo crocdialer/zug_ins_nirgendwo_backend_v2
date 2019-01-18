@@ -22,6 +22,8 @@ var playlists []*Playlist
 
 var playlistMutex sync.RWMutex
 
+var playlistFile = "playlists.json"
+
 // GetPlaylists returns a slice of Playlists
 func GetPlaylists() []*Playlist {
 	playlistMutex.RLock()
@@ -33,24 +35,57 @@ func GetPlaylists() []*Playlist {
 func SetPlaylists(p []*Playlist) {
 	playlistMutex.Lock()
 	defer playlistMutex.Unlock()
-	playlists = p
+	playlists = append(playlists[:1], p...)
 }
 
 // Init will initialize the module state,
 // meaning it scans for movies, icons and saved playlists
 // and inits the IconMap and Playlists variables
 func Init(baseDir string) {
+	log.Println("media directory:", baseDir)
 	// TODO: init IconMap from json-file
+
+	// clear slice
+	playlists = playlists[:0]
 
 	// start with "All Movies" playlist
 	allMovies := &Playlist{Title: "All Movies", Movies: createMovieList(baseDir)}
-
 	playlists = append(playlists, allMovies)
+
+	// read user playlists from file
+	jsonFile, err := os.Open(playlistFile)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer jsonFile.Close()
+
+	var loadedLists []*Playlist
+	decoder := json.NewDecoder(jsonFile)
+	decoder.Decode(&loadedLists)
+
+	// append to playlists
+	playlists = append(playlists, loadedLists...)
 }
 
-// Save will save the module state to json-config files
+// Save will save the module state to one or more json-config files
 func Save(baseDir string) {
+	jsonFile, err := os.Create(playlistFile)
 
+	if err != nil {
+		panic(err)
+	}
+	defer jsonFile.Close()
+
+	// encode playlist as json
+	enc := json.NewEncoder(jsonFile)
+	enc.SetIndent("", "  ")
+	enc.Encode(GetPlaylists()[1:])
+
+	// jsonFile.Write(jsonData)
+	// jsonFile.Close()
+	log.Println("JSON data written to ", jsonFile.Name())
 }
 
 // Playlist groups information for a playlist of movies
@@ -155,6 +190,21 @@ func (updater *PlaybackStateUpdater) worker() {
 			}
 		}
 	}
+}
+
+// Playback sets a new playlist-index and optionally a new playlist
+func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int) {
+	var playlist []string
+
+	if playlistIndex < 0 {
+		playlistIndex = updater.state.PlaylistIndex
+	}
+	list := playlists[playlistIndex]
+
+	for _, mov := range list.Movies {
+		playlist = append(playlist, mov.Path)
+	}
+	command.Playback(updater.Address, movieIndex, playlist)
 }
 
 // createMovieList recursively walks a directory and return a list of all movie files
