@@ -14,6 +14,51 @@ import (
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 )
 
+// IconMap holds our icon-paths
+var IconMap map[string]string
+
+// playlists holds our playlists of movies
+var playlists []*Playlist
+
+var playlistMutex sync.RWMutex
+
+// GetPlaylists returns a slice of Playlists
+func GetPlaylists() []*Playlist {
+	playlistMutex.RLock()
+	defer playlistMutex.RUnlock()
+	return playlists
+}
+
+// SetPlaylists sets the
+func SetPlaylists(p []*Playlist) {
+	playlistMutex.Lock()
+	defer playlistMutex.Unlock()
+	playlists = p
+}
+
+// Init will initialize the module state,
+// meaning it scans for movies, icons and saved playlists
+// and inits the IconMap and Playlists variables
+func Init(baseDir string) {
+	// TODO: init IconMap from json-file
+
+	// start with "All Movies" playlist
+	allMovies := &Playlist{Title: "All Movies", Movies: createMovieList(baseDir)}
+
+	playlists = append(playlists, allMovies)
+}
+
+// Save will save the module state to json-config files
+func Save(baseDir string) {
+
+}
+
+// Playlist groups information for a playlist of movies
+type Playlist struct {
+	Title  string   `json:"title"`
+	Movies []*Movie `json:"movies"`
+}
+
 // Movie groups information about a movie-file
 type Movie struct {
 	Path     string `json:"path"`
@@ -26,6 +71,7 @@ type PlaybackState struct {
 	MovieIndex    int     `json:"movie_index"`
 	Position      float64 `json:"position"`
 	Duration      float64 `json:"duration"`
+	Volume        float64 `json:"volume"`
 	Rate          float64 `json:"rate"`
 	Playing       bool    `json:"playing"`
 }
@@ -111,8 +157,8 @@ func (updater *PlaybackStateUpdater) worker() {
 	}
 }
 
-// CreateMovieList recursively walks a directory and return a list of all movie files
-func CreateMovieList(baseDir string) (movies []Movie) {
+// createMovieList recursively walks a directory and return a list of all movie files
+func createMovieList(baseDir string) (movies []*Movie) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -147,13 +193,11 @@ func CreateMovieList(baseDir string) (movies []Movie) {
 		return nil
 	})
 	sort.Strings(files)
-	// TODO: fetch icon paths here
-	var icons map[string]string
 
 	for _, f := range files {
 		// log.Println(f)
-		mov := Movie{Path: f}
-		if iconPath, ok := icons[f]; ok {
+		mov := &Movie{Path: f}
+		if iconPath, ok := IconMap[f]; ok {
 			mov.IconPath = iconPath
 		}
 		movies = append(movies, mov)

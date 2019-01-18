@@ -37,20 +37,41 @@ var queueWorker *command.QueueWorker
 // playback info and updater
 var playStateUpdater *playlist.PlaybackStateUpdater
 
-func handleMovies(w http.ResponseWriter, r *http.Request) {
+// GET
+func handlePlaylistsGET(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.Encode(playlist.GetPlaylists())
+}
 
+// POST
+func handlePlaylistsPOST(w http.ResponseWriter, r *http.Request) {
 	// set content type
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	// create movielist
-	movieList := playlist.CreateMovieList("/home/crocdialer/Movies")
+	// ps := playlist.GetPlaylists()
 
-	for _, mov := range movieList {
-		log.Println(mov)
+	var ps []*playlist.Playlist
+
+	// decode json-request
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(&ps)
+
+	log.Println("handlePlaylistsPOST", "items:")
+	for _, item := range ps {
+		log.Println("title:", item.Title)
+		for _, mov := range item.Movies {
+			log.Println("movie:", mov.Path)
+			log.Println("icon:", mov.IconPath)
+		}
 	}
 
+	// set state to hold the altered playlist slice
+	playlist.SetPlaylists(ps)
+
 	enc := json.NewEncoder(w)
-	enc.Encode(movieList)
+	enc.Encode(ps)
 }
 
 // GET
@@ -61,23 +82,23 @@ func handlePlayStateGET(w http.ResponseWriter, r *http.Request) {
 	enc.Encode(playStateUpdater.GetState())
 }
 
-// POST
-func handlePlayStatePOST(w http.ResponseWriter, r *http.Request) {
-	// set content type
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-	state := playStateUpdater.GetState()
-
-	// decode json-request
-	decoder := json.NewDecoder(r.Body)
-	decoder.Decode(&state)
-
-	// set new state
-	playStateUpdater.SetState(state)
-
-	enc := json.NewEncoder(w)
-	enc.Encode(state)
-}
+// // POST
+// func handlePlayStatePOST(w http.ResponseWriter, r *http.Request) {
+// 	// set content type
+// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+//
+// 	state := playStateUpdater.GetState()
+//
+// 	// decode json-request
+// 	decoder := json.NewDecoder(r.Body)
+// 	decoder.Decode(&state)
+//
+// 	// set new state
+// 	playStateUpdater.SetState(state)
+//
+// 	enc := json.NewEncoder(w)
+// 	enc.Encode(state)
+// }
 
 // POST
 func handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -151,12 +172,17 @@ func main() {
 
 	// http services
 	muxRouter.Handle("/events", sseServer)
-	muxRouter.HandleFunc("/movies", corsHandler(handleMovies)).Methods("GET", "OPTIONS")
+	muxRouter.HandleFunc("/playlists", corsHandler(handlePlaylistsGET)).Methods("GET", "OPTIONS")
+	muxRouter.HandleFunc("/playlists", corsHandler(handlePlaylistsPOST)).Methods("POST", "OPTIONS")
+
 	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
-	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStatePOST)).Methods("POST", "OPTIONS")
+	// muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStatePOST)).Methods("POST", "OPTIONS")
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
 	http.Handle("/", muxRouter)
+
+	// init playlist module
+	playlist.Init("/home/crocdialer/Movies")
 
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
