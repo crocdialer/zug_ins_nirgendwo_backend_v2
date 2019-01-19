@@ -42,7 +42,7 @@ func SetPlaylists(p []*Playlist) {
 // meaning it scans for movies, icons and saved playlists
 // and inits the IconMap and Playlists variables
 func Init(baseDir string) {
-	log.Println("media directory:", baseDir)
+	log.Println("scanning media directory:", baseDir)
 	// TODO: init IconMap from json-file
 
 	// clear slice
@@ -67,6 +67,8 @@ func Init(baseDir string) {
 
 	// append to playlists
 	playlists = append(playlists, loadedLists...)
+
+	log.Printf("found %d movies and %d playlists\n", len(allMovies.Movies), len(playlists))
 }
 
 // Save will save the module state to one or more json-config files
@@ -205,6 +207,12 @@ func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int)
 		playlist = append(playlist, mov.Path)
 	}
 	command.Playback(updater.Address, movieIndex, playlist)
+
+	// set playlist index, since mediaplayer will not be aware of it
+	updater.stateMutex.Lock()
+	defer updater.stateMutex.Unlock()
+	updater.state.PlaylistIndex = playlistIndex
+	updater.state.MovieIndex = movieIndex
 }
 
 // createMovieList recursively walks a directory and return a list of all movie files

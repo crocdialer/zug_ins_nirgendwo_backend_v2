@@ -61,14 +61,14 @@ func handlePlaylistsPOST(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.Decode(&ps)
 
-	log.Println("handlePlaylistsPOST", "items:")
-	for _, item := range ps {
-		log.Println("title:", item.Title)
-		for _, mov := range item.Movies {
-			log.Println("movie:", mov.Path)
-			log.Println("icon:", mov.IconPath)
-		}
-	}
+	// log.Println("handlePlaylistsPOST", "items:")
+	// for _, item := range ps {
+	// 	log.Println("title:", item.Title)
+	// 	for _, mov := range item.Movies {
+	// 		log.Println("movie:", mov.Path)
+	// 		log.Println("icon:", mov.IconPath)
+	// 	}
+	// }
 
 	// set state to hold the altered playlist slice
 	playlist.SetPlaylists(ps)
@@ -84,24 +84,6 @@ func handlePlayStateGET(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.Encode(playStateUpdater.GetState())
 }
-
-// // POST
-// func handlePlayStatePOST(w http.ResponseWriter, r *http.Request) {
-// 	// set content type
-// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-//
-// 	state := playStateUpdater.GetState()
-//
-// 	// decode json-request
-// 	decoder := json.NewDecoder(r.Body)
-// 	decoder.Decode(&state)
-//
-// 	// set new state
-// 	playStateUpdater.SetState(state)
-//
-// 	enc := json.NewEncoder(w)
-// 	enc.Encode(state)
-// }
 
 // POST
 func handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +130,12 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.Encode(true)
 
+	// save playlist state
 	playlist.Save(mediaDir)
+
+	// save settings in mediaplayer
+	command := &command.Command{Command: "save_settings"}
+	queueWorker.Commands <- command
 }
 
 // GET
@@ -158,7 +145,12 @@ func handleLoad(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.Encode(true)
 
+	// load (re-init) playlist state
 	playlist.Init(mediaDir)
+
+	// load settings in mediaplayer
+	command := &command.Command{Command: "load_settings"}
+	queueWorker.Commands <- command
 }
 
 // preflight OPTIONS
@@ -203,6 +195,11 @@ func main() {
 		mediaDir = os.Args[3]
 	}
 
+	// get player address and port
+	if len(os.Args) > 4 {
+		playerAddress = os.Args[4]
+	}
+
 	// start command processing
 	queueWorker = command.NewQueueWorker(playerAddress)
 	go commandQueueCollector(queueWorker.Results)
@@ -241,5 +238,6 @@ func main() {
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
 
 	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
+	log.Println("media_player @", playerAddress)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))
 }

@@ -142,7 +142,7 @@ func Playback(ip string, index int, playlist []string) {
 	// serialize to json
 	if jsonBytes, jsonErr := json.Marshal(compList); jsonErr == nil {
 
-		log.Println(string(jsonBytes))
+		// log.Println(string(jsonBytes))
 
 		// tcp communication with kinskiPlayer here
 		con, err := net.Dial("tcp", ip)
@@ -158,5 +158,4 @@ func Playback(ip string, index int, playlist []string) {
 	} else {
 		log.Println("could not marshal Playback struct to json")
 	}
-
 }
