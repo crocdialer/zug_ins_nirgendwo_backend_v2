@@ -237,6 +237,9 @@ func main() {
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
 
+	// generate thumbnails in the background
+	go playlist.GenerateThumbnails(serveFilesPath)
+
 	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
 	log.Println("media_player @", playerAddress)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))

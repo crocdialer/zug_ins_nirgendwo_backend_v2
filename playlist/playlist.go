@@ -3,6 +3,8 @@ package playlist
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bakape/thumbnailer"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 )
 
@@ -20,9 +23,13 @@ var IconMap map[string]string
 // playlists holds our playlists of movies
 var playlists []*Playlist
 
+var movieMap map[string]*Movie
+
 var playlistMutex sync.RWMutex
 
 var playlistFile = "playlists.json"
+
+var thumbsFile = "thumbs.json"
 
 // GetPlaylists returns a slice of Playlists
 func GetPlaylists() []*Playlist {
@@ -44,6 +51,17 @@ func SetPlaylists(p []*Playlist) {
 func Init(baseDir string) {
 	log.Println("scanning media directory:", baseDir)
 	// TODO: init IconMap from json-file
+
+	if IconMap == nil {
+		IconMap = make(map[string]string)
+	}
+
+	// read user playlists from file
+	if iconFile, err := os.Open(thumbsFile); err == nil {
+		decoder := json.NewDecoder(iconFile)
+		decoder.Decode(&IconMap)
+		log.Println("icons loaded:", len(IconMap))
+	}
 
 	// clear slice
 	playlists = playlists[:0]
@@ -73,21 +91,23 @@ func Init(baseDir string) {
 
 // Save will save the module state to one or more json-config files
 func Save(baseDir string) {
-	jsonFile, err := os.Create(playlistFile)
-
-	if err != nil {
-		panic(err)
+	if jsonFile, err := os.Create(playlistFile); err == nil {
+		defer jsonFile.Close()
+		// encode playlist as json
+		enc := json.NewEncoder(jsonFile)
+		enc.SetIndent("", "  ")
+		enc.Encode(GetPlaylists()[1:])
+		log.Println("playlist JSON written to ", jsonFile.Name())
 	}
-	defer jsonFile.Close()
 
-	// encode playlist as json
-	enc := json.NewEncoder(jsonFile)
-	enc.SetIndent("", "  ")
-	enc.Encode(GetPlaylists()[1:])
-
-	// jsonFile.Write(jsonData)
-	// jsonFile.Close()
-	log.Println("JSON data written to ", jsonFile.Name())
+	if iconsFile, err := os.Create(thumbsFile); err == nil {
+		defer iconsFile.Close()
+		// encode playlist as json
+		enc := json.NewEncoder(iconsFile)
+		enc.SetIndent("", "  ")
+		enc.Encode(IconMap)
+		log.Println("icons JSON written to ", iconsFile.Name())
+	}
 }
 
 // Playlist groups information for a playlist of movies
@@ -98,8 +118,9 @@ type Playlist struct {
 
 // Movie groups information about a movie-file
 type Movie struct {
-	Path     string `json:"path"`
-	IconPath string `json:"icon"`
+	Path     string  `json:"path"`
+	Duration float64 `json:"duration"`
+	IconPath string  `json:"icon"`
 }
 
 // PlaybackState groups information for the current playback state
@@ -218,6 +239,10 @@ func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int)
 // createMovieList recursively walks a directory and return a list of all movie files
 func createMovieList(baseDir string) (movies []*Movie) {
 
+	if movieMap == nil {
+		movieMap = make(map[string]*Movie)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("could not create movielist:", r)
@@ -255,10 +280,71 @@ func createMovieList(baseDir string) (movies []*Movie) {
 	for _, f := range files {
 		// log.Println(f)
 		mov := &Movie{Path: f}
+		movieMap[f] = mov
 		if iconPath, ok := IconMap[f]; ok {
 			mov.IconPath = iconPath
 		}
 		movies = append(movies, mov)
 	}
 	return movies
+}
+
+// GenerateThumbnails scans the availability of thumbs for all movies
+// and genrates missing ones
+func GenerateThumbnails(baseDir string) {
+
+	for _, mov := range movieMap {
+
+		// check for existing thumbnail
+		if p, hasIcon := IconMap[mov.Path]; hasIcon {
+			mov.IconPath = p
+		} else {
+			// open movie-file
+			if movieFile, err := os.Open(mov.Path); err == nil {
+
+				context, contextErr := thumbnailer.NewFFContext(movieFile)
+
+				if contextErr != nil {
+					log.Println(contextErr)
+					continue
+				}
+				// get duration
+				// movieDur := context.Duration()
+
+				log.Println("generating thumb for: ", movieFile.Name())
+
+				if thumb, thumbErr := context.Thumbnail(); thumbErr == nil {
+					_ = thumb
+					imgRelPath := filepath.Join("/img/thumbs", filepath.Base(movieFile.Name())+".jpg")
+					log.Println("done ->", imgRelPath)
+					imgAbsPath := filepath.Join(baseDir, imgRelPath)
+
+					if imgFile, err := os.Create(imgAbsPath); err == nil {
+
+						img := image.NewRGBA(image.Rect(0, 0, int(thumb.Width), int(thumb.Height)))
+						img.Pix = thumb.Data
+
+						if encodeErr := jpeg.Encode(imgFile, img, nil); encodeErr != nil {
+							log.Println(encodeErr)
+						}
+						imgFile.Close()
+						log.Println("done ->", imgRelPath)
+
+						mov.IconPath = imgRelPath
+						IconMap[mov.Path] = imgRelPath
+					} else {
+						log.Println("could not create file:", imgAbsPath)
+					}
+
+				} else {
+					log.Println("error:", thumbErr)
+				}
+				context.Close()
+				movieFile.Close()
+			} else {
+				log.Println("could not open movie file")
+			}
+		}
+	}
+
 }
