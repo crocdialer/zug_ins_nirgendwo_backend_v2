@@ -25,7 +25,7 @@ var playlists []*Playlist
 
 var movieMap map[string]*Movie
 
-var playlistMutex sync.RWMutex
+var playlistMutex, thumbMutex sync.RWMutex
 
 var playlistFile = "playlists.json"
 
@@ -58,8 +58,10 @@ func Init(baseDir string) {
 
 	// read user playlists from file
 	if iconFile, err := os.Open(thumbsFile); err == nil {
+		thumbMutex.Lock()
 		decoder := json.NewDecoder(iconFile)
 		decoder.Decode(&IconMap)
+		thumbMutex.Unlock()
 		log.Println("icons loaded:", len(IconMap))
 	}
 
@@ -102,6 +104,9 @@ func Save(baseDir string) {
 
 	if iconsFile, err := os.Create(thumbsFile); err == nil {
 		defer iconsFile.Close()
+		thumbMutex.RLock()
+		defer thumbMutex.RUnlock()
+
 		// encode playlist as json
 		enc := json.NewEncoder(iconsFile)
 		enc.SetIndent("", "  ")
@@ -347,7 +352,10 @@ func GenerateThumbnails(baseDir string) {
 						log.Println("done ->", imgRelPath)
 
 						mov.IconPath = imgRelPath
+
+						thumbMutex.Lock()
 						IconMap[mov.Path] = imgRelPath
+						thumbMutex.Unlock()
 					} else {
 						log.Println("could not create file:", imgAbsPath)
 					}
