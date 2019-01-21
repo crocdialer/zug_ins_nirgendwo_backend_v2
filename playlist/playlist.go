@@ -223,6 +223,13 @@ func (updater *PlaybackStateUpdater) worker() {
 
 // Playback sets a new playlist-index and optionally a new playlist
 func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
+
 	var playlist []string
 
 	if playlistIndex < 0 {
