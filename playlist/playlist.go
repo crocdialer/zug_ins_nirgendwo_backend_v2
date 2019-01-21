@@ -102,17 +102,17 @@ func Save(baseDir string) {
 		log.Println("playlist JSON written to ", jsonFile.Name())
 	}
 
-	if iconsFile, err := os.Create(thumbsFile); err == nil {
-		defer iconsFile.Close()
-		thumbMutex.RLock()
-		defer thumbMutex.RUnlock()
-
-		// encode playlist as json
-		enc := json.NewEncoder(iconsFile)
-		enc.SetIndent("", "  ")
-		enc.Encode(IconMap)
-		log.Println("icons JSON written to ", iconsFile.Name())
-	}
+	// if iconsFile, err := os.Create(thumbsFile); err == nil {
+	// 	defer iconsFile.Close()
+	// 	thumbMutex.RLock()
+	// 	defer thumbMutex.RUnlock()
+	//
+	// 	// encode playlist as json
+	// 	enc := json.NewEncoder(iconsFile)
+	// 	enc.SetIndent("", "  ")
+	// 	enc.Encode(IconMap)
+	// 	log.Println("icons JSON written to ", iconsFile.Name())
+	// }
 }
 
 // Playlist groups information for a playlist of movies
@@ -305,7 +305,9 @@ func createMovieList(baseDir string) (movies []*Movie) {
 // GenerateThumbnails scans the availability of thumbs for all movies
 // and genrates missing ones
 func GenerateThumbnails(baseDir string) {
-	log.Println("GenerateThumbnails -> scanning for new movies in:", baseDir)
+	log.Println("GenerateThumbnails -> scanning for new movies")
+
+	dirtyThumbs := false
 
 	defer func() {
 		if err := recover(); err != nil {
@@ -328,6 +330,10 @@ func GenerateThumbnails(baseDir string) {
 		if p, hasIcon := IconMap[mov.Path]; hasIcon {
 			mov.IconPath = p
 		} else {
+
+			// we are about to change something
+			dirtyThumbs = true
+
 			// open movie-file
 			if movieFile, err := os.Open(mov.Path); err == nil {
 
@@ -378,4 +384,17 @@ func GenerateThumbnails(baseDir string) {
 		}
 	}
 
+	if dirtyThumbs {
+		if iconsFile, err := os.Create(thumbsFile); err == nil {
+			defer iconsFile.Close()
+			thumbMutex.RLock()
+			defer thumbMutex.RUnlock()
+
+			// encode playlist as json
+			enc := json.NewEncoder(iconsFile)
+			enc.SetIndent("", "  ")
+			enc.Encode(IconMap)
+			log.Println("icons JSON written to ", iconsFile.Name())
+		}
+	}
 }
