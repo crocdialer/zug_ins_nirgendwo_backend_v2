@@ -40,6 +40,9 @@ var playStateUpdater *playlist.PlaybackStateUpdater
 // media base directory
 var mediaDir = "/media/astrobase/Movies"
 
+// interval to scan the movie-directory
+var scanMovieDirInterval = time.Minute * 5
+
 // GET
 func handlePlaylistsGET(w http.ResponseWriter, r *http.Request) {
 	// set content type
@@ -236,6 +239,21 @@ func main() {
 
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
+
+	scanTicker := time.NewTicker(scanMovieDirInterval)
+	quitScan := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-scanTicker.C:
+				go playlist.GenerateThumbnails(serveFilesPath)
+			case <-quitScan:
+				scanTicker.Stop()
+				return
+			}
+		}
+	}()
 
 	// generate thumbnails in the background
 	go playlist.GenerateThumbnails(serveFilesPath)

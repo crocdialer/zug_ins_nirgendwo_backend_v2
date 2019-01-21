@@ -125,6 +125,7 @@ type Movie struct {
 
 // PlaybackState groups information for the current playback state
 type PlaybackState struct {
+	Path          string  `json:"path"`
 	PlaylistIndex int     `json:"playlist_index"`
 	MovieIndex    int     `json:"movie_index"`
 	Position      float64 `json:"position"`
@@ -292,6 +293,22 @@ func createMovieList(baseDir string) (movies []*Movie) {
 // GenerateThumbnails scans the availability of thumbs for all movies
 // and genrates missing ones
 func GenerateThumbnails(baseDir string) {
+	log.Println("GenerateThumbnails -> scanning for new movies in:", baseDir)
+
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println("recovered from", err)
+		}
+	}()
+
+	thumbsDirRel := "/img/thumbs"
+	thumbsDirAbs := filepath.Join(baseDir, thumbsDirRel)
+
+	// create directory, if necessary
+	if dirErr := os.MkdirAll(thumbsDirAbs, os.ModePerm); dirErr != nil {
+		log.Println("could not create directory:", thumbsDirAbs)
+		return
+	}
 
 	for _, mov := range movieMap {
 
@@ -315,8 +332,7 @@ func GenerateThumbnails(baseDir string) {
 
 				if thumb, thumbErr := context.Thumbnail(); thumbErr == nil {
 					_ = thumb
-					imgRelPath := filepath.Join("/img/thumbs", filepath.Base(movieFile.Name())+".jpg")
-					log.Println("done ->", imgRelPath)
+					imgRelPath := filepath.Join(thumbsDirRel, filepath.Base(movieFile.Name())+".jpg")
 					imgAbsPath := filepath.Join(baseDir, imgRelPath)
 
 					if imgFile, err := os.Create(imgAbsPath); err == nil {
