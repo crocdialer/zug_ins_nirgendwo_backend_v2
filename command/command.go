@@ -86,7 +86,7 @@ func Send(cmd *Command, ip string, responseBuffer []byte) *ACK {
 			ack.Success = true
 
 			// timeout 50ms
-			timeOut := time.Now().Add(time.Millisecond * 50)
+			timeOut := time.Now().Add(time.Millisecond * 200)
 
 			if deadLineErr := con.SetReadDeadline(timeOut); deadLineErr != nil {
 				log.Fatal(deadLineErr)
