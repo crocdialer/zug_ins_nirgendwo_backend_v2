@@ -237,12 +237,16 @@ func main() {
 	// init playlist module
 	playlist.Init(mediaDir)
 
+	// initial thumb generation
+	playlist.GenerateThumbnails(serveFilesPath)
+
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
 
 	scanTicker := time.NewTicker(scanMovieDirInterval)
 	quitScan := make(chan struct{})
 
+	// periodically generate thumbnails in the background
 	go func() {
 		for {
 			select {
@@ -255,10 +259,7 @@ func main() {
 		}
 	}()
 
-	// generate thumbnails in the background
-	go playlist.GenerateThumbnails(serveFilesPath)
-
-	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
+	go log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
 	log.Println("media_player @", playerAddress)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))
 }
