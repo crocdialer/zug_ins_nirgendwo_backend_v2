@@ -49,8 +49,7 @@ func SetPlaylists(p []*Playlist) {
 // meaning it scans for movies, icons and saved playlists
 // and inits the IconMap and Playlists variables
 func Init(baseDir string) {
-	log.Println("scanning media directory:", baseDir)
-	// TODO: init IconMap from json-file
+	log.Println("(re-)init playlist module:", baseDir)
 
 	if IconMap == nil {
 		IconMap = make(map[string]string)
@@ -70,6 +69,11 @@ func Init(baseDir string) {
 
 	// start with "All Movies" playlist
 	allMovies := &Playlist{Title: "All Movies", Movies: createMovieList(baseDir)}
+
+	// lock playlist mutex
+	playlistMutex.Lock()
+	defer playlistMutex.Unlock()
+
 	playlists = append(playlists, allMovies)
 
 	// read user playlists from file
@@ -84,6 +88,15 @@ func Init(baseDir string) {
 	var loadedLists []*Playlist
 	decoder := json.NewDecoder(jsonFile)
 	decoder.Decode(&loadedLists)
+
+	// make sure lists use same pointers
+	for _, pl := range loadedLists {
+		for movIndex, mov := range pl.Movies {
+			if newMov, ok := movieMap[mov.Path]; ok {
+				pl.Movies[movIndex] = newMov
+			}
+		}
+	}
 
 	// append to playlists
 	playlists = append(playlists, loadedLists...)
@@ -101,18 +114,6 @@ func Save(baseDir string) {
 		enc.Encode(GetPlaylists()[1:])
 		log.Println("playlist JSON written to ", jsonFile.Name())
 	}
-
-	// if iconsFile, err := os.Create(thumbsFile); err == nil {
-	// 	defer iconsFile.Close()
-	// 	thumbMutex.RLock()
-	// 	defer thumbMutex.RUnlock()
-	//
-	// 	// encode playlist as json
-	// 	enc := json.NewEncoder(iconsFile)
-	// 	enc.SetIndent("", "  ")
-	// 	enc.Encode(IconMap)
-	// 	log.Println("icons JSON written to ", iconsFile.Name())
-	// }
 }
 
 // Playlist groups information for a playlist of movies
@@ -207,16 +208,23 @@ func (updater *PlaybackStateUpdater) worker() {
 			return
 		case <-updater.ticker.C:
 			ack := command.Send(requestStateCmd, updater.Address, responseBuffer)
+			updater.stateMutex.Lock()
+
 			if ack.Success {
-				updater.stateMutex.Lock()
 				if err := json.Unmarshal([]byte(ack.Value), updater.state); err == nil {
 					// state updated
-					updater.output <- updater.state
 				} else {
 					log.Println("could not parse playbackstate")
 				}
-				updater.stateMutex.Unlock()
+			} else {
+				// log.Println("player not reachable")
+				updater.state.Path = "no player connected.mp4"
+				updater.state.Position = 0
+				updater.state.Duration = 0
+				updater.state.Playing = false
 			}
+			updater.output <- updater.state
+			updater.stateMutex.Unlock()
 		}
 	}
 }
@@ -251,6 +259,8 @@ func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int)
 
 // createMovieList recursively walks a directory and return a list of all movie files
 func createMovieList(baseDir string) (movies []*Movie) {
+
+	log.Println("scanning media directory:", baseDir)
 
 	if movieMap == nil {
 		movieMap = make(map[string]*Movie)
@@ -304,8 +314,9 @@ func createMovieList(baseDir string) (movies []*Movie) {
 
 // GenerateThumbnails scans the availability of thumbs for all movies
 // and genrates missing ones
-func GenerateThumbnails(baseDir string) {
+func GenerateThumbnails(mediaDir, outDir string) {
 	log.Println("GenerateThumbnails -> scanning for new movies")
+	_ = createMovieList(mediaDir)
 
 	dirtyThumbs := false
 
@@ -316,7 +327,7 @@ func GenerateThumbnails(baseDir string) {
 	}()
 
 	thumbsDirRel := "/img/thumbs"
-	thumbsDirAbs := filepath.Join(baseDir, thumbsDirRel)
+	thumbsDirAbs := filepath.Join(outDir, thumbsDirRel)
 
 	// create directory, if necessary
 	if dirErr := os.MkdirAll(thumbsDirAbs, os.ModePerm); dirErr != nil {
@@ -351,7 +362,7 @@ func GenerateThumbnails(baseDir string) {
 				if thumb, thumbErr := context.Thumbnail(); thumbErr == nil {
 					_ = thumb
 					imgRelPath := filepath.Join(thumbsDirRel, filepath.Base(movieFile.Name())+".jpg")
-					imgAbsPath := filepath.Join(baseDir, imgRelPath)
+					imgAbsPath := filepath.Join(outDir, imgRelPath)
 
 					if imgFile, err := os.Create(imgAbsPath); err == nil {
 
@@ -396,5 +407,8 @@ func GenerateThumbnails(baseDir string) {
 			enc.Encode(IconMap)
 			log.Println("icons JSON written to ", iconsFile.Name())
 		}
+
+		// force re-init
+		Init(mediaDir)
 	}
 }

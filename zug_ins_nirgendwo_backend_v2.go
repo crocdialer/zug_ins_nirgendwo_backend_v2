@@ -13,6 +13,7 @@ import (
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/playlist"
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/sse"
+	"github.com/fsnotify/fsnotify"
 	"github.com/gorilla/mux"
 )
 
@@ -43,6 +44,8 @@ var mediaDir = "/media/astrobase/Movies"
 // interval to scan the movie-directory
 var scanMovieDirInterval = time.Minute * 5
 
+var saveChan chan bool
+
 // GET
 func handlePlaylistsGET(w http.ResponseWriter, r *http.Request) {
 	// set content type
@@ -55,23 +58,14 @@ func handlePlaylistsGET(w http.ResponseWriter, r *http.Request) {
 func handlePlaylistsPOST(w http.ResponseWriter, r *http.Request) {
 	// set content type
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-	// ps := playlist.GetPlaylists()
-
 	var ps []*playlist.Playlist
 
 	// decode json-request
 	decoder := json.NewDecoder(r.Body)
 	decoder.Decode(&ps)
 
-	// log.Println("handlePlaylistsPOST", "items:")
-	// for _, item := range ps {
-	// 	log.Println("title:", item.Title)
-	// 	for _, mov := range item.Movies {
-	// 		log.Println("movie:", mov.Path)
-	// 		log.Println("icon:", mov.IconPath)
-	// 	}
-	// }
+	// signal a changed that we need to save
+	trySave()
 
 	// set state to hold the altered playlist slice
 	playlist.SetPlaylists(ps)
@@ -121,40 +115,43 @@ func handlePlayback(w http.ResponseWriter, r *http.Request) {
 	// make it so!
 	go playStateUpdater.Playback(newState.MovieIndex, newState.PlaylistIndex)
 
+	// signal a changed that we need to save
+	trySave()
+
 	// encode json ACK and send as response
 	enc := json.NewEncoder(w)
 	enc.Encode(true)
 }
 
-// GET
-func handleSave(w http.ResponseWriter, r *http.Request) {
-	// set content type
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.Encode(true)
-
-	// save playlist state
-	playlist.Save(mediaDir)
-
-	// save settings in mediaplayer
-	command := &command.Command{Command: "save_settings"}
-	queueWorker.Commands <- command
-}
-
-// GET
-func handleLoad(w http.ResponseWriter, r *http.Request) {
-	// set content type
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.Encode(true)
-
-	// load (re-init) playlist state
-	playlist.Init(mediaDir)
-
-	// load settings in mediaplayer
-	command := &command.Command{Command: "load_settings"}
-	queueWorker.Commands <- command
-}
+// // GET
+// func handleSave(w http.ResponseWriter, r *http.Request) {
+// 	// set content type
+// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+// 	enc := json.NewEncoder(w)
+// 	enc.Encode(true)
+//
+// 	// save playlist state
+// 	playlist.Save(mediaDir)
+//
+// 	// save settings in mediaplayer
+// 	command := &command.Command{Command: "save_settings"}
+// 	queueWorker.Commands <- command
+// }
+//
+// // GET
+// func handleLoad(w http.ResponseWriter, r *http.Request) {
+// 	// set content type
+// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+// 	enc := json.NewEncoder(w)
+// 	enc.Encode(true)
+//
+// 	// load (re-init) playlist state
+// 	playlist.Init(mediaDir)
+//
+// 	// load settings in mediaplayer
+// 	command := &command.Command{Command: "load_settings"}
+// 	queueWorker.Commands <- command
+// }
 
 // preflight OPTIONS
 func corsHandler(handler http.HandlerFunc) http.HandlerFunc {
@@ -175,6 +172,64 @@ func commandQueueCollector(results <-chan *command.ACK) {
 
 		// send ack via SSE
 		sseServer.ACKQueue <- ack
+	}
+}
+
+func watchMediaDirectory(mediaDir string, doneChan chan bool) {
+
+	log.Println("watching media-directory:", mediaDir)
+
+	// creates a new file watcher
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		fmt.Println("ERROR", err)
+	}
+	defer watcher.Close()
+
+	// watch our mediaDir
+	if err := watcher.Add(mediaDir); err != nil {
+		fmt.Println("ERROR", err)
+	}
+	for {
+		select {
+		case event := <-watcher.Events:
+			// watch for events
+			log.Printf("event in directory: %#v\n", event)
+			log.Println("waiting 2 minutes for things to calm down ...")
+			time.Sleep(time.Minute * 2)
+			playlist.GenerateThumbnails(mediaDir, serveFilesPath)
+
+		case err := <-watcher.Errors:
+			// watch for errors
+			fmt.Println("ERROR", err)
+		}
+	}
+}
+
+func trySave() {
+	select {
+	case saveChan <- true:
+		// log.Println("saving")
+	default:
+		// log.Println("save blocked (debouncing)")
+	}
+}
+
+func saveDeBounced(timeOut time.Duration) {
+	for {
+		select {
+		case <-saveChan:
+			// log.Println("saveDeBounced: ok")
+
+			// save playlist state
+			playlist.Save(mediaDir)
+
+			// save settings in mediaplayer
+			command := &command.Command{Command: "save_settings"}
+			queueWorker.Commands <- command
+
+			time.Sleep(timeOut)
+		}
 	}
 }
 
@@ -203,6 +258,8 @@ func main() {
 		playerAddress = os.Args[4]
 	}
 
+	saveChan = make(chan bool)
+
 	// start command processing
 	queueWorker = command.NewQueueWorker(playerAddress)
 	go commandQueueCollector(queueWorker.Results)
@@ -227,8 +284,8 @@ func main() {
 	muxRouter.HandleFunc("/playback", corsHandler(handlePlayback)).Methods("POST", "OPTIONS")
 
 	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
-	muxRouter.HandleFunc("/save", corsHandler(handleSave)).Methods("GET", "OPTIONS")
-	muxRouter.HandleFunc("/load", corsHandler(handleLoad)).Methods("GET", "OPTIONS")
+	// muxRouter.HandleFunc("/save", corsHandler(handleSave)).Methods("GET", "OPTIONS")
+	// muxRouter.HandleFunc("/load", corsHandler(handleLoad)).Methods("GET", "OPTIONS")
 
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
@@ -238,28 +295,18 @@ func main() {
 	playlist.Init(mediaDir)
 
 	// initial thumb generation
-	playlist.GenerateThumbnails(serveFilesPath)
+	playlist.GenerateThumbnails(mediaDir, serveFilesPath)
 
 	// kick off periodic playbackstate updates
 	playStateUpdater = playlist.NewPlaybackStateUpdater(playerAddress, time.Second, sseServer.PlaybackQueue)
 
-	scanTicker := time.NewTicker(scanMovieDirInterval)
-	quitScan := make(chan struct{})
+	// watch for changes in directory
+	go watchMediaDirectory(mediaDir, nil)
 
-	// periodically generate thumbnails in the background
-	go func() {
-		for {
-			select {
-			case <-scanTicker.C:
-				go playlist.GenerateThumbnails(serveFilesPath)
-			case <-quitScan:
-				scanTicker.Stop()
-				return
-			}
-		}
-	}()
+	// debounced save-settings routine
+	go saveDeBounced(time.Second * 10)
 
-	go log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
+	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
 	log.Println("media_player @", playerAddress)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil))
 }
