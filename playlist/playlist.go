@@ -17,105 +17,6 @@ import (
 	"github.com/crocdialer/zug_ins_nirgendwo_backend_v2/command"
 )
 
-// IconMap holds our icon-paths
-var IconMap map[string]string
-
-// playlists holds our playlists of movies
-var playlists []*Playlist
-
-var movieMap map[string]*Movie
-
-var playlistMutex, thumbMutex sync.RWMutex
-
-var playlistFile = "playlists.json"
-
-var thumbsFile = "thumbs.json"
-
-// GetPlaylists returns a slice of Playlists
-func GetPlaylists() []*Playlist {
-	playlistMutex.RLock()
-	defer playlistMutex.RUnlock()
-	return playlists
-}
-
-// SetPlaylists sets the
-func SetPlaylists(p []*Playlist) {
-	playlistMutex.Lock()
-	defer playlistMutex.Unlock()
-	playlists = append(playlists[:1], p...)
-}
-
-// Init will initialize the module state,
-// meaning it scans for movies, icons and saved playlists
-// and inits the IconMap and Playlists variables
-func Init(baseDir string) {
-	log.Println("(re-)init playlist module:", baseDir)
-
-	if IconMap == nil {
-		IconMap = make(map[string]string)
-	}
-
-	// read user playlists from file
-	if iconFile, err := os.Open(thumbsFile); err == nil {
-		thumbMutex.Lock()
-		decoder := json.NewDecoder(iconFile)
-		decoder.Decode(&IconMap)
-		thumbMutex.Unlock()
-		log.Println("icons loaded:", len(IconMap))
-	}
-
-	// clear slice
-	playlists = playlists[:0]
-
-	// start with "All Movies" playlist
-	allMovies := &Playlist{Title: "All Movies", Movies: createMovieList(baseDir)}
-
-	// lock playlist mutex
-	playlistMutex.Lock()
-	defer playlistMutex.Unlock()
-
-	playlists = append(playlists, allMovies)
-
-	// read user playlists from file
-	jsonFile, err := os.Open(playlistFile)
-
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer jsonFile.Close()
-
-	var loadedLists []*Playlist
-	decoder := json.NewDecoder(jsonFile)
-	decoder.Decode(&loadedLists)
-
-	// make sure lists use same pointers
-	for _, pl := range loadedLists {
-		for movIndex, mov := range pl.Movies {
-			if newMov, ok := movieMap[mov.Path]; ok {
-				pl.Movies[movIndex] = newMov
-			}
-		}
-	}
-
-	// append to playlists
-	playlists = append(playlists, loadedLists...)
-
-	log.Printf("found %d movies and %d playlists\n", len(allMovies.Movies), len(playlists))
-}
-
-// Save will save the module state to one or more json-config files
-func Save(baseDir string) {
-	if jsonFile, err := os.Create(playlistFile); err == nil {
-		defer jsonFile.Close()
-		// encode playlist as json
-		enc := json.NewEncoder(jsonFile)
-		enc.SetIndent("", "  ")
-		enc.Encode(GetPlaylists()[1:])
-		log.Println("playlist JSON written to ", jsonFile.Name())
-	}
-}
-
 // Playlist groups information for a playlist of movies
 type Playlist struct {
 	Title  string   `json:"title"`
@@ -126,6 +27,7 @@ type Playlist struct {
 type Movie struct {
 	Path     string  `json:"path"`
 	Duration float64 `json:"duration"`
+	Delay    float64 `json:"delay"`
 	IconPath string  `json:"icon"`
 }
 
@@ -214,7 +116,7 @@ func (updater *PlaybackStateUpdater) worker() {
 				if err := json.Unmarshal([]byte(ack.Value), updater.state); err == nil {
 					// state updated
 				} else {
-					log.Println("could not parse playbackstate")
+					// log.Println("could not parse playbackstate")
 				}
 			} else {
 				// log.Println("player not reachable")
@@ -255,6 +157,106 @@ func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int)
 	defer updater.stateMutex.Unlock()
 	updater.state.PlaylistIndex = playlistIndex
 	updater.state.MovieIndex = movieIndex
+}
+
+// IconMap holds our icon-paths
+var IconMap map[string]string
+
+// playlists holds our playlists of movies
+var playlists []*Playlist
+
+var movieMap map[string]*Movie
+
+var playlistMutex, thumbMutex sync.RWMutex
+
+var playlistFile = "playlists.json"
+
+var thumbsFile = "thumbs.json"
+
+// GetPlaylists returns a slice of Playlists
+func GetPlaylists() []*Playlist {
+	playlistMutex.RLock()
+	defer playlistMutex.RUnlock()
+	return playlists
+}
+
+// SetPlaylists sets the
+func SetPlaylists(p []*Playlist) {
+	playlistMutex.Lock()
+	defer playlistMutex.Unlock()
+	playlists = append(playlists[:1], p...)
+}
+
+// Init will initialize the module state,
+// meaning it scans for movies, icons and saved playlists
+// and inits the IconMap and Playlists variables
+func Init(baseDir string) {
+	log.Println("(re-)init playlist module:", baseDir)
+
+	if IconMap == nil {
+		IconMap = make(map[string]string)
+	}
+
+	// read user playlists from file
+	if iconFile, err := os.Open(thumbsFile); err == nil {
+		thumbMutex.Lock()
+		decoder := json.NewDecoder(iconFile)
+		decoder.Decode(&IconMap)
+		thumbMutex.Unlock()
+		log.Println("icons loaded:", len(IconMap))
+	}
+
+	// clear slice
+	playlists = playlists[:0]
+
+	// start with "All Movies" playlist
+	allMovies := &Playlist{Title: "All Movies", Movies: createMovieList(baseDir)}
+
+	// lock playlist mutex
+	playlistMutex.Lock()
+	defer playlistMutex.Unlock()
+
+	playlists = append(playlists, allMovies)
+
+	// read user playlists from file
+	jsonFile, err := os.Open(playlistFile)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer jsonFile.Close()
+
+	var loadedLists []*Playlist
+	decoder := json.NewDecoder(jsonFile)
+	decoder.Decode(&loadedLists)
+
+	// make sure lists use same pointers
+	// TODO: remove deleted movies
+	for _, pl := range loadedLists {
+		for movIndex, mov := range pl.Movies {
+			if newMov, ok := movieMap[mov.Path]; ok {
+				pl.Movies[movIndex] = newMov
+			}
+		}
+	}
+
+	// append to playlists
+	playlists = append(playlists, loadedLists...)
+
+	log.Printf("found %d movies and %d playlists\n", len(allMovies.Movies), len(playlists))
+}
+
+// Save will save the module state to one or more json-config files
+func Save(baseDir string) {
+	if jsonFile, err := os.Create(playlistFile); err == nil {
+		defer jsonFile.Close()
+		// encode playlist as json
+		enc := json.NewEncoder(jsonFile)
+		enc.SetIndent("", "  ")
+		enc.Encode(GetPlaylists()[1:])
+		log.Println("playlist JSON written to ", jsonFile.Name())
+	}
 }
 
 // createMovieList recursively walks a directory and return a list of all movie files
@@ -360,7 +362,6 @@ func GenerateThumbnails(mediaDir, outDir string) {
 				log.Println("generating thumb for: ", movieFile.Name())
 
 				if thumb, thumbErr := context.Thumbnail(); thumbErr == nil {
-					_ = thumb
 					imgRelPath := filepath.Join(thumbsDirRel, filepath.Base(movieFile.Name())+".jpg")
 					imgAbsPath := filepath.Join(outDir, imgRelPath)
 
@@ -398,14 +399,14 @@ func GenerateThumbnails(mediaDir, outDir string) {
 	if dirtyThumbs {
 		if iconsFile, err := os.Create(thumbsFile); err == nil {
 			defer iconsFile.Close()
-			thumbMutex.RLock()
-			defer thumbMutex.RUnlock()
 
 			// encode playlist as json
+			thumbMutex.RLock()
 			enc := json.NewEncoder(iconsFile)
 			enc.SetIndent("", "  ")
 			enc.Encode(IconMap)
 			log.Println("icons JSON written to ", iconsFile.Name())
+			thumbMutex.RUnlock()
 		}
 
 		// force re-init

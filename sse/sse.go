@@ -10,7 +10,7 @@ import (
 )
 
 // A Server holds open client connections,
-// listens for incoming events on its NodeEvent and CommandEvent channels
+// listens for incoming events on its ACKQueue and PlaybackQueue channels
 // and broadcasts event data to all registered connections
 type Server struct {
 	ACKQueue chan *command.ACK
