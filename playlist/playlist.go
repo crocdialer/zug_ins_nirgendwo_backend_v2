@@ -167,7 +167,7 @@ var playlists []*Playlist
 
 var movieMap map[string]*Movie
 
-var playlistMutex, thumbMutex sync.RWMutex
+var playlistMutex, thumbMutex, movieMutex sync.RWMutex
 
 var playlistFile = "playlists.json"
 
@@ -180,11 +180,27 @@ func GetPlaylists() []*Playlist {
 	return playlists
 }
 
-// SetPlaylists sets the
+// SetPlaylists looks up items in the provided playlist slice by path
+// and updates all secondary lists with pointers from the global movieMap, if found
 func SetPlaylists(p []*Playlist) {
+
+	var newLists []*Playlist
+	movieMutex.RLock()
+	defer movieMutex.RUnlock()
+
+	for _, list := range p {
+		listCopy := &Playlist{Title: list.Title}
+
+		for _, mov := range list.Movies {
+			if movPtr, ok := movieMap[mov.Path]; ok {
+				listCopy.Movies = append(listCopy.Movies, movPtr)
+			}
+		}
+		newLists = append(newLists, listCopy)
+	}
 	playlistMutex.Lock()
 	defer playlistMutex.Unlock()
-	playlists = append(playlists[:1], p...)
+	playlists = append(playlists[:1], newLists...)
 }
 
 // Init will initialize the module state,
@@ -214,9 +230,8 @@ func Init(baseDir string) {
 
 	// lock playlist mutex
 	playlistMutex.Lock()
-	defer playlistMutex.Unlock()
-
 	playlists = append(playlists, allMovies)
+	playlistMutex.Unlock()
 
 	// read user playlists from file
 	jsonFile, err := os.Open(playlistFile)
@@ -231,19 +246,8 @@ func Init(baseDir string) {
 	decoder := json.NewDecoder(jsonFile)
 	decoder.Decode(&loadedLists)
 
-	// make sure lists use same pointers
-	// TODO: remove deleted movies
-	for _, pl := range loadedLists {
-		for movIndex, mov := range pl.Movies {
-			if newMov, ok := movieMap[mov.Path]; ok {
-				pl.Movies[movIndex] = newMov
-			}
-		}
-	}
-
 	// append to playlists
-	playlists = append(playlists, loadedLists...)
-
+	SetPlaylists(loadedLists)
 	log.Printf("found %d movies and %d playlists\n", len(allMovies.Movies), len(playlists))
 }
 
@@ -305,7 +309,12 @@ func createMovieList(baseDir string) (movies []*Movie) {
 	for _, f := range files {
 		// log.Println(f)
 		mov := &Movie{Path: f}
+
+		// protect insertion into map with mutex
+		movieMutex.Lock()
 		movieMap[f] = mov
+		movieMutex.Unlock()
+
 		if iconPath, ok := IconMap[f]; ok {
 			mov.IconPath = iconPath
 		}
@@ -337,6 +346,7 @@ func GenerateThumbnails(mediaDir, outDir string) {
 		return
 	}
 
+	movieMutex.RLock()
 	for _, mov := range movieMap {
 
 		// check for existing thumbnail
@@ -395,6 +405,7 @@ func GenerateThumbnails(mediaDir, outDir string) {
 			}
 		}
 	}
+	movieMutex.RUnlock()
 
 	if dirtyThumbs {
 		if iconsFile, err := os.Create(thumbsFile); err == nil {

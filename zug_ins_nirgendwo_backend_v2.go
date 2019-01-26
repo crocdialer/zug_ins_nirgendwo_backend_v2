@@ -42,7 +42,7 @@ var playStateUpdater *playlist.PlaybackStateUpdater
 var mediaDir = "/media/astrobase/Movies"
 
 // interval to scan the movie-directory
-var scanMovieDirInterval = time.Minute * 5
+var autoSaveMinInterval = time.Minute * 5
 
 var saveChan chan bool
 
@@ -64,11 +64,11 @@ func handlePlaylistsPOST(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.Decode(&ps)
 
-	// signal a changed that we need to save
-	trySave()
-
 	// set state to hold the altered playlist slice
 	playlist.SetPlaylists(ps)
+
+	// signal that we need to save
+	trySave()
 
 	enc := json.NewEncoder(w)
 	enc.Encode(ps)
@@ -122,36 +122,6 @@ func handlePlayback(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.Encode(true)
 }
-
-// // GET
-// func handleSave(w http.ResponseWriter, r *http.Request) {
-// 	// set content type
-// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-// 	enc := json.NewEncoder(w)
-// 	enc.Encode(true)
-//
-// 	// save playlist state
-// 	playlist.Save(mediaDir)
-//
-// 	// save settings in mediaplayer
-// 	command := &command.Command{Command: "save_settings"}
-// 	queueWorker.Commands <- command
-// }
-//
-// // GET
-// func handleLoad(w http.ResponseWriter, r *http.Request) {
-// 	// set content type
-// 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-// 	enc := json.NewEncoder(w)
-// 	enc.Encode(true)
-//
-// 	// load (re-init) playlist state
-// 	playlist.Init(mediaDir)
-//
-// 	// load settings in mediaplayer
-// 	command := &command.Command{Command: "load_settings"}
-// 	queueWorker.Commands <- command
-// }
 
 // preflight OPTIONS
 func corsHandler(handler http.HandlerFunc) http.HandlerFunc {
@@ -217,19 +187,19 @@ func trySave() {
 
 func saveDeBounced(timeOut time.Duration) {
 	for {
-		select {
-		case <-saveChan:
-			// log.Println("saveDeBounced: ok")
+		// will block eventually
+		<-saveChan
 
-			// save playlist state
-			playlist.Save(mediaDir)
+		// log.Println("saveDeBounced: ok")
 
-			// save settings in mediaplayer
-			command := &command.Command{Command: "save_settings"}
-			queueWorker.Commands <- command
+		// save playlist state
+		playlist.Save(mediaDir)
 
-			time.Sleep(timeOut)
-		}
+		// save settings in mediaplayer
+		command := &command.Command{Command: "save_settings"}
+		queueWorker.Commands <- command
+
+		time.Sleep(timeOut)
 	}
 }
 
@@ -258,7 +228,7 @@ func main() {
 		playerAddress = os.Args[4]
 	}
 
-	saveChan = make(chan bool)
+	saveChan = make(chan bool, 2)
 
 	// start command processing
 	queueWorker = command.NewQueueWorker(playerAddress)
@@ -284,8 +254,6 @@ func main() {
 	muxRouter.HandleFunc("/playback", corsHandler(handlePlayback)).Methods("POST", "OPTIONS")
 
 	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
-	// muxRouter.HandleFunc("/save", corsHandler(handleSave)).Methods("GET", "OPTIONS")
-	// muxRouter.HandleFunc("/load", corsHandler(handleLoad)).Methods("GET", "OPTIONS")
 
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)
@@ -304,7 +272,7 @@ func main() {
 	go watchMediaDirectory(mediaDir, nil)
 
 	// debounced save-settings routine
-	go saveDeBounced(time.Second * 10)
+	go saveDeBounced(autoSaveMinInterval)
 
 	log.Println("server listening on port", listenPort, " -- serving files from", serveFilesPath)
 	log.Println("media_player @", playerAddress)
