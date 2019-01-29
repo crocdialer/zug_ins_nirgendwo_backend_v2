@@ -33,6 +33,7 @@ type Movie struct {
 
 // PlaybackState groups information for the current playback state
 type PlaybackState struct {
+	Connected     bool    `json:"connected"`
 	Path          string  `json:"path"`
 	PlaylistIndex int     `json:"playlist_index"`
 	MovieIndex    int     `json:"movie_index"`
@@ -94,6 +95,22 @@ func (updater *PlaybackStateUpdater) SetState(state PlaybackState) {
 	*updater.state = state
 }
 
+// UpdateMovieSettings looks up the provided movie by path
+// and updates its settings, if found
+func UpdateMovieSettings(movie *Movie) {
+	if movie != nil {
+		movieMutex.Lock()
+
+		if m, ok := movieMap[movie.Path]; ok {
+			m.Delay = movie.Delay
+			movieMap[movie.Path] = m
+			// log.Println("movieSettings updated:", m)
+		}
+		movieMutex.Unlock()
+		SetPlaylists(playlists[1:])
+	}
+}
+
 func (updater *PlaybackStateUpdater) worker() {
 	// defer log.Println("transmit done:", cmd)
 
@@ -115,12 +132,14 @@ func (updater *PlaybackStateUpdater) worker() {
 			if ack.Success {
 				if err := json.Unmarshal([]byte(ack.Value), updater.state); err == nil {
 					// state updated
+					updater.state.Connected = true
 				} else {
 					// log.Println("could not parse playbackstate")
 				}
 			} else {
 				// log.Println("player not reachable")
-				updater.state.Path = "no player connected.mp4"
+				updater.state.Connected = false
+				updater.state.Path = ""
 				updater.state.Position = 0
 				updater.state.Duration = 0
 				updater.state.Playing = false
@@ -141,16 +160,19 @@ func (updater *PlaybackStateUpdater) Playback(movieIndex int, playlistIndex int)
 	}()
 
 	var playlist []string
+	var delays []float64
 
 	if playlistIndex < 0 {
 		playlistIndex = updater.state.PlaylistIndex
 	}
 	list := playlists[playlistIndex]
 
+	// extract values from playlist
 	for _, mov := range list.Movies {
 		playlist = append(playlist, mov.Path)
+		delays = append(delays, mov.Delay)
 	}
-	command.Playback(updater.Address, movieIndex, playlist)
+	command.Playback(updater.Address, movieIndex, playlist, delays)
 
 	// set playlist index, since mediaplayer will not be aware of it
 	updater.stateMutex.Lock()
@@ -185,14 +207,16 @@ func GetPlaylists() []*Playlist {
 func SetPlaylists(p []*Playlist) {
 
 	var newLists []*Playlist
-	movieMutex.RLock()
-	defer movieMutex.RUnlock()
+	movieMutex.Lock()
+	defer movieMutex.Unlock()
 
 	for _, list := range p {
 		listCopy := &Playlist{Title: list.Title}
 
 		for _, mov := range list.Movies {
 			if movPtr, ok := movieMap[mov.Path]; ok {
+				movPtr.Delay = mov.Delay
+				movieMap[mov.Path] = movPtr
 				listCopy.Movies = append(listCopy.Movies, movPtr)
 			}
 		}
@@ -200,6 +224,14 @@ func SetPlaylists(p []*Playlist) {
 	}
 	playlistMutex.Lock()
 	defer playlistMutex.Unlock()
+
+	// update "All Movies" playlist
+	for i, mov := range playlists[0].Movies {
+		if movPtr, ok := movieMap[mov.Path]; ok {
+			playlists[0].Movies[i] = movPtr
+		}
+	}
+
 	playlists = append(playlists[:1], newLists...)
 }
 

@@ -42,7 +42,7 @@ var playStateUpdater *playlist.PlaybackStateUpdater
 var mediaDir = "/media/astrobase/Movies"
 
 // interval to scan the movie-directory
-var autoSaveMinInterval = time.Minute * 5
+var autoSaveMinInterval = time.Second * 10
 
 var saveChan chan bool
 
@@ -115,7 +115,27 @@ func handlePlayback(w http.ResponseWriter, r *http.Request) {
 	// make it so!
 	go playStateUpdater.Playback(newState.MovieIndex, newState.PlaylistIndex)
 
-	// signal a changed that we need to save
+	// signal a change that we need to save
+	trySave()
+
+	// encode json ACK and send as response
+	enc := json.NewEncoder(w)
+	enc.Encode(true)
+}
+
+// POST
+func handleMovieSettings(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	// decode json-request
+	m := &playlist.Movie{}
+	decoder := json.NewDecoder(r.Body)
+	decoder.Decode(m)
+
+	go playlist.UpdateMovieSettings(m)
+
+	// signal a change that we need to save
 	trySave()
 
 	// encode json ACK and send as response
@@ -179,9 +199,7 @@ func watchMediaDirectory(mediaDir string, doneChan chan bool) {
 func trySave() {
 	select {
 	case saveChan <- true:
-		// log.Println("saving")
 	default:
-		// log.Println("save blocked (debouncing)")
 	}
 }
 
@@ -254,6 +272,9 @@ func main() {
 	muxRouter.HandleFunc("/playback", corsHandler(handlePlayback)).Methods("POST", "OPTIONS")
 
 	muxRouter.HandleFunc("/playstate", corsHandler(handlePlayStateGET)).Methods("GET", "OPTIONS")
+
+	// set the delay for a single movie
+	muxRouter.HandleFunc("/movie", corsHandler(handleMovieSettings)).Methods("POST", "OPTIONS")
 
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)

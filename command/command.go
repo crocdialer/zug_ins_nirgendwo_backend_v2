@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const RemoteComponentName = "zug_ins_nirgendwo_2019"
+
 // Command realizes a simple RPC interface
 type Command struct {
 	CommandID int           `json:"id"`
@@ -108,7 +110,7 @@ func Send(cmd *Command, ip string, responseBuffer []byte) *ACK {
 }
 
 // Playback sends the provided index and playlist to an attached media_player
-func Playback(ip string, index int, playlist []string) {
+func Playback(ip string, index int, playlist []string, delays []float64) {
 
 	type Property struct {
 		Name  string      `json:"name"`
@@ -121,13 +123,21 @@ func Playback(ip string, index int, playlist []string) {
 		Properties []Property `json:"properties"`
 	}
 
-	comp := ComponentStruct{Name: "media_player"}
+	comp := ComponentStruct{Name: RemoteComponentName}
 
 	if playlist != nil {
 		comp.Properties = append(comp.Properties, Property{
 			Name:  "playlist",
 			Type:  "string_array",
 			Value: playlist,
+		})
+	}
+
+	if delays != nil {
+		comp.Properties = append(comp.Properties, Property{
+			Name:  "delays",
+			Type:  "float_array",
+			Value: delays,
 		})
 	}
 
