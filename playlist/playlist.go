@@ -427,7 +427,7 @@ func GenerateThumbnails(mediaDir, outDir string) {
 					continue
 				}
 				// get duration
-				// movieDur := context.Duration()
+				movieDur := context.Duration().Seconds()
 
 				log.Println("generating thumb for: ", movieFile.Name())
 
@@ -447,7 +447,7 @@ func GenerateThumbnails(mediaDir, outDir string) {
 						log.Println("done ->", imgRelPath)
 
 						mov.IconPath = imgRelPath
-
+						mov.Duration = movieDur
 						thumbMutex.Lock()
 						IconMap[mov.Path] = imgRelPath
 						thumbMutex.Unlock()
