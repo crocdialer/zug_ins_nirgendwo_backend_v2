@@ -195,6 +195,8 @@ var playlistFile = "playlists.json"
 
 var thumbsFile = "thumbs.json"
 
+var movieDataFile = "movieData.json"
+
 // GetPlaylists returns a slice of Playlists
 func GetPlaylists() []*Playlist {
 	playlistMutex.RLock()
@@ -225,13 +227,14 @@ func SetPlaylists(p []*Playlist) {
 	playlistMutex.Lock()
 	defer playlistMutex.Unlock()
 
-	// update "All Movies" playlist
-	for i, mov := range playlists[0].Movies {
-		if movPtr, ok := movieMap[mov.Path]; ok {
-			playlists[0].Movies[i] = movPtr
+	if len(playlists) > 0 {
+		// update "All Movies" playlist
+		for i, mov := range playlists[0].Movies {
+			if movPtr, ok := movieMap[mov.Path]; ok {
+				playlists[0].Movies[i] = movPtr
+			}
 		}
 	}
-
 	playlists = append(playlists[:1], newLists...)
 }
 
@@ -293,6 +296,17 @@ func Save(baseDir string) {
 		enc.Encode(GetPlaylists()[1:])
 		log.Println("playlist JSON written to ", jsonFile.Name())
 	}
+
+	if dataFile, err := os.Create(movieDataFile); err == nil {
+		movieMutex.RLock()
+		// encode playlist as json
+		enc := json.NewEncoder(dataFile)
+		// enc.SetIndent("", "  ")
+		enc.Encode(movieMap)
+		log.Println("movie-database written to ", dataFile.Name())
+		movieMutex.RUnlock()
+		dataFile.Close()
+	}
 }
 
 // createMovieList recursively walks a directory and return a list of all movie files
@@ -302,6 +316,16 @@ func createMovieList(baseDir string) (movies []*Movie) {
 
 	if movieMap == nil {
 		movieMap = make(map[string]*Movie)
+
+		// read user playlists from file
+		if dataFile, err := os.Open(movieDataFile); err == nil {
+			movieMutex.Lock()
+			decoder := json.NewDecoder(dataFile)
+			decoder.Decode(&movieMap)
+			movieMutex.Unlock()
+			log.Println("movie database loaded:", len(movieMap))
+			dataFile.Close()
+		}
 	}
 
 	defer func() {
