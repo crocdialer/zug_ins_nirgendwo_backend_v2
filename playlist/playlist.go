@@ -47,8 +47,8 @@ type PlaybackState struct {
 // NewPlaybackState creates the default playbackstate
 func NewPlaybackState() *PlaybackState {
 	state := &PlaybackState{
-		PlaylistIndex: -1,
-		MovieIndex:    -1,
+		PlaylistIndex: 0,
+		MovieIndex:    0,
 	}
 	return state
 }
@@ -215,8 +215,8 @@ func SetPlaylists(p []*Playlist) {
 
 		for _, mov := range list.Movies {
 			if movPtr, ok := movieMap[mov.Path]; ok {
-				movPtr.Delay = mov.Delay
-				movieMap[mov.Path] = movPtr
+				// movPtr.Delay = mov.Delay
+				// movieMap[mov.Path] = movPtr
 				listCopy.Movies = append(listCopy.Movies, movPtr)
 			}
 		}
