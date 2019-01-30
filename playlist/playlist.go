@@ -364,11 +364,15 @@ func createMovieList(baseDir string) (movies []*Movie) {
 
 	for _, f := range files {
 		// log.Println(f)
-		mov := &Movie{Path: f}
-
 		// protect insertion into map with mutex
 		movieMutex.Lock()
-		movieMap[f] = mov
+		var mov *Movie
+		var ok bool
+
+		if mov, ok = movieMap[f]; !ok {
+			mov = &Movie{Path: f}
+			movieMap[f] = mov
+		}
 		movieMutex.Unlock()
 
 		if iconPath, ok := IconMap[f]; ok {
