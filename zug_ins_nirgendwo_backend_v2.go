@@ -74,6 +74,18 @@ func handlePlaylistsPOST(w http.ResponseWriter, r *http.Request) {
 	enc.Encode(ps)
 }
 
+// POST
+func handleRescanGET(w http.ResponseWriter, r *http.Request) {
+	// set content type
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	// rescan for media
+	playlist.GenerateThumbnails(mediaDir, serveFilesPath)
+
+	enc := json.NewEncoder(w)
+	enc.Encode("scanning for new movies ...")
+}
+
 // GET
 func handlePlayStateGET(w http.ResponseWriter, r *http.Request) {
 	// set content type
@@ -275,6 +287,8 @@ func main() {
 
 	// set the delay for a single movie
 	muxRouter.HandleFunc("/movie", corsHandler(handleMovieSettings)).Methods("POST", "OPTIONS")
+
+	muxRouter.HandleFunc("/rescan", corsHandler(handleRescanGET)).Methods("GET", "OPTIONS")
 
 	muxRouter.HandleFunc("/cmd", corsHandler(handleCommand)).Methods("POST", "OPTIONS")
 	muxRouter.PathPrefix("/").Handler(fs)

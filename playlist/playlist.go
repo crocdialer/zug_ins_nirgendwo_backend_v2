@@ -309,7 +309,7 @@ func Save(baseDir string) {
 	}
 }
 
-// createMovieList recursively walks a directory and return a list of all movie files
+// createMovieList recursively walks a directory and returns a list of all movie files
 func createMovieList(baseDir string) (movies []*Movie) {
 
 	log.Println("scanning media directory:", baseDir)
