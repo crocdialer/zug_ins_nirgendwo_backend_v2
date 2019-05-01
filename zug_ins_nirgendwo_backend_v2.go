@@ -82,6 +82,9 @@ func handleRescanGET(w http.ResponseWriter, r *http.Request) {
 	// rescan for media
 	playlist.GenerateThumbnails(mediaDir, serveFilesPath)
 
+	// init playlist module
+	playlist.Init(mediaDir)
+
 	enc := json.NewEncoder(w)
 	enc.Encode("scanning for new movies ...")
 }
@@ -297,7 +300,7 @@ func main() {
 	// init playlist module
 	playlist.Init(mediaDir)
 
-	// initial thumb generation
+	// initial thumb generation + (re-)init playlist module
 	playlist.GenerateThumbnails(mediaDir, serveFilesPath)
 
 	// kick off periodic playbackstate updates
